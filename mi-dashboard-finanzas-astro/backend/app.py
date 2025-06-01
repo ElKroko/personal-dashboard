@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -6,7 +6,9 @@ import pandas as pd
 import os
 import tempfile
 import numpy as np
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel
+from datetime import datetime
 
 # Importar utilidades locales
 from utils.leer_excel import procesar_archivo_excel
@@ -14,6 +16,10 @@ from utils.categorizar import aplicar_categorizacion
 from utils.fechas import agregar_columnas_tiempo, obtener_rango_fechas, obtener_periodos_disponibles
 from utils.agregaciones import calcular_todas_agregaciones
 from utils.bd import DatabaseManager
+
+# Modelos Pydantic para requests
+class CategoriaUpdate(BaseModel):
+    nueva_categoria: str
 
 # Instancia global del manejador de base de datos (opcional)
 db_manager = None
@@ -156,14 +162,17 @@ async def procesar_archivo(
         # 5. Obtener información adicional
         rango_fechas = obtener_rango_fechas(df)
         periodos_disponibles = obtener_periodos_disponibles(df)
-        
-        # 6. Preparar lista de transacciones para el frontend
+          # 6. Preparar lista de transacciones para el frontend
         transacciones_list = df.to_dict('records')
         
         # Convertir fechas a strings para JSON
         for transaccion in transacciones_list:
             if pd.notna(transaccion['fecha']):
-                transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                if hasattr(transaccion['fecha'], 'strftime'):
+                    transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                elif isinstance(transaccion['fecha'], str):
+                    # Ya es string, mantener como está
+                    pass
         
         # 7. Guardar en base de datos si se solicita
         if guardar_bd and db_manager:
@@ -246,13 +255,17 @@ async def obtener_historial():
         # Obtener información adicional
         rango_fechas = obtener_rango_fechas(df)
         periodos_disponibles = obtener_periodos_disponibles(df)
-        
-        # Preparar lista de transacciones
+          # Preparar lista de transacciones
         transacciones_list = df.to_dict('records')
-          # Convertir fechas a strings
+        
+        # Convertir fechas a strings
         for transaccion in transacciones_list:
             if pd.notna(transaccion['fecha']):
-                transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                if hasattr(transaccion['fecha'], 'strftime'):
+                    transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                elif isinstance(transaccion['fecha'], str):
+                    # Ya es string, mantener como está
+                    pass
         
         response_data = {
             "status": "success",
@@ -397,14 +410,17 @@ async def cargar_archivos_tef_locales():
         # 5. Obtener información adicional
         rango_fechas = obtener_rango_fechas(df_completo)
         periodos_disponibles = obtener_periodos_disponibles(df_completo)
-        
-        # 6. Preparar lista de transacciones para el frontend
+          # 6. Preparar lista de transacciones para el frontend
         transacciones_list = df_completo.to_dict('records')
         
         # Convertir fechas a strings para JSON
         for transaccion in transacciones_list:
             if pd.notna(transaccion['fecha']):
-                transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                if hasattr(transaccion['fecha'], 'strftime'):
+                    transaccion['fecha'] = transaccion['fecha'].strftime('%Y-%m-%d')
+                elif isinstance(transaccion['fecha'], str):
+                    # Ya es string, mantener como está
+                    pass
         
         # 7. Guardar en base de datos si está disponible
         bd_status = "Base de datos no disponible"
@@ -445,59 +461,88 @@ async def cargar_archivos_tef_locales():
             detail=f"Error al procesar archivos TEF: {str(e)}"
         )
 
+# =====================================================
+# NUEVOS ENDPOINTS PARA SISTEMA INTERACTIVO
+# =====================================================
+
 @app.get("/transacciones/")
 async def obtener_transacciones(
-    fecha_desde: Optional[str] = None,
-    fecha_hasta: Optional[str] = None,
-    categoria: Optional[str] = None,
-    tipo_movimiento: Optional[str] = None,
-    texto_busqueda: Optional[str] = None,
-    limit: Optional[int] = 50,
-    offset: Optional[int] = 0
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde en formato YYYY-MM-DD"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta en formato YYYY-MM-DD"),
+    categoria: Optional[str] = Query(None, description="Filtrar por categoría"),
+    tipo_movimiento: Optional[str] = Query(None, description="Filtrar por tipo (Ingreso/Gasto)"),
+    texto_busqueda: Optional[str] = Query(None, description="Buscar en detalle de transacciones"),
+    solo_sin_categorizar: Optional[bool] = Query(False, description="Solo mostrar transacciones sin categorizar"),
+    page: int = Query(1, ge=1, description="Número de página"),
+    page_size: int = Query(50, ge=1, le=500, description="Tamaño de página")
 ):
     """
     Obtiene transacciones con filtros opcionales y paginación.
-    
-    Query Parameters:
-    - fecha_desde: Fecha inicio (YYYY-MM-DD)
-    - fecha_hasta: Fecha fin (YYYY-MM-DD)
-    - categoria: Categoría específica
-    - tipo_movimiento: 'INGRESO' o 'GASTO'
-    - texto_busqueda: Buscar en campo detalle
-    - limit: Máximo resultados por página (default 50)
-    - offset: Número de registros a saltar (default 0)
     """
     try:
         if not db_manager:
             raise HTTPException(status_code=503, detail="Base de datos no disponible")
         
-        # Obtener transacciones filtradas
-        transacciones = db_manager.obtener_transacciones_filtradas(
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta,
-            categoria=categoria,
-            tipo_movimiento=tipo_movimiento,
-            texto_busqueda=texto_busqueda,
-            limit=limit,
-            offset=offset
-        )
+        # Obtener todas las transacciones
+        df = db_manager.obtener_todas_transacciones()
         
-        # Contar total de transacciones que coinciden con los filtros
-        total_count = db_manager.contar_transacciones_filtradas(
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta,
-            categoria=categoria,
-            tipo_movimiento=tipo_movimiento,
-            texto_busqueda=texto_busqueda
-        )
+        if df.empty:
+            return JSONResponse(content={
+                "transacciones": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": 0
+            })
+        
+        # Aplicar filtros
+        if fecha_desde:
+            df = df[df['fecha'] >= fecha_desde]
+        
+        if fecha_hasta:
+            df = df[df['fecha'] <= fecha_hasta]
+        
+        if categoria:
+            df = df[df['categoria'] == categoria]
+        
+        if tipo_movimiento:
+            df = df[df['tipo'] == tipo_movimiento]
+        
+        if texto_busqueda:
+            df = df[df['detalle'].str.contains(texto_busqueda, case=False, na=False)]
+        
+        if solo_sin_categorizar:
+            df = df[df['categoria'] == "Sin categorizar"]
+        
+        # Ordenar por fecha descendente
+        df = df.sort_values('fecha', ascending=False)
+        
+        # Calcular paginación
+        total = len(df)
+        offset = (page - 1) * page_size
+        df_paginated = df.iloc[offset:offset + page_size]
+          # Convertir a lista de diccionarios
+        transacciones = []
+        for _, row in df_paginated.iterrows():
+            transacciones.append({
+                'id': int(row['id']) if 'id' in row and pd.notna(row['id']) else None,
+                'fecha': row['fecha'].strftime('%Y-%m-%d') if pd.notna(row['fecha']) and hasattr(row['fecha'], 'strftime') else str(row['fecha']) if pd.notna(row['fecha']) else None,
+                'detalle': str(row['detalle']) if pd.notna(row['detalle']) else '',
+                'monto': float(row['monto']) if pd.notna(row['monto']) else 0.0,
+                'tipo': str(row['tipo']) if pd.notna(row['tipo']) else '',
+                'categoria': str(row['categoria']) if pd.notna(row['categoria']) else 'Sin categorizar',
+                'tipo_regla': str(row['tipo_regla']) if 'tipo_regla' in row and pd.notna(row['tipo_regla']) else 'mapeo_por_palabra_clave',
+                'fecha_modificacion': row['fecha_modificacion'].strftime('%Y-%m-%d %H:%M:%S') if 'fecha_modificacion' in row and pd.notna(row['fecha_modificacion']) else None
+            })
+        
+        total_pages = (total + page_size - 1) // page_size
         
         return JSONResponse(content={
-            "status": "success",
             "transacciones": transacciones,
-            "total_count": total_count,
-            "limit": limit,
-            "offset": offset,
-            "has_more": (offset + limit) < total_count
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages
         })
         
     except Exception as e:
@@ -505,61 +550,104 @@ async def obtener_transacciones(
 
 @app.get("/resumen/categorias/")
 async def obtener_resumen_categorias(
-    fecha_desde: Optional[str] = None,
-    fecha_hasta: Optional[str] = None
+    fecha_desde: Optional[str] = Query(None, description="Fecha desde en formato YYYY-MM-DD"),
+    fecha_hasta: Optional[str] = Query(None, description="Fecha hasta en formato YYYY-MM-DD")
 ):
     """
-    Obtiene resumen de totales agrupados por categoría.
-    
-    Query Parameters:
-    - fecha_desde: Fecha inicio (YYYY-MM-DD)
-    - fecha_hasta: Fecha fin (YYYY-MM-DD)
+    Obtiene resumen por categorías con filtros de fecha opcionales.
     """
     try:
         if not db_manager:
             raise HTTPException(status_code=503, detail="Base de datos no disponible")
         
-        resumen = db_manager.obtener_resumen_por_categorias(
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta
-        )
+        # Obtener todas las transacciones
+        df = db_manager.obtener_todas_transacciones()
         
-        return JSONResponse(content={
-            "status": "success",
-            "resumen_categorias": resumen
-        })
+        if df.empty:
+            return JSONResponse(content={"categorias": []})
+        
+        # Aplicar filtros de fecha
+        if fecha_desde:
+            df = df[df['fecha'] >= fecha_desde]
+        
+        if fecha_hasta:
+            df = df[df['fecha'] <= fecha_hasta]
+        
+        # Agrupar por categoría y tipo
+        resumen = df.groupby(['categoria', 'tipo'])['monto'].sum().reset_index()
+        
+        # Crear estructura de datos para el resumen
+        categorias_dict = {}
+        for _, row in resumen.iterrows():
+            categoria = row['categoria']
+            tipo = row['tipo']
+            monto = float(row['monto'])
+            
+            if categoria not in categorias_dict:
+                categorias_dict[categoria] = {
+                    'categoria': categoria,
+                    'total_ingresos': 0.0,
+                    'total_gastos': 0.0,
+                    'total_neto': 0.0
+                }
+            
+            if tipo == 'Ingreso':
+                categorias_dict[categoria]['total_ingresos'] = monto
+            else:
+                categorias_dict[categoria]['total_gastos'] = monto
+        
+        # Calcular neto y convertir a lista
+        categorias_lista = []
+        for categoria_data in categorias_dict.values():
+            categoria_data['total_neto'] = categoria_data['total_ingresos'] + categoria_data['total_gastos']
+            categorias_lista.append(categoria_data)
+        
+        # Ordenar por total neto (valor absoluto) descendente
+        categorias_lista.sort(key=lambda x: abs(x['total_neto']), reverse=True)
+        
+        return JSONResponse(content={"categorias": categorias_lista})
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener resumen por categorías: {str(e)}")
 
 @app.patch("/transacciones/{transaccion_id}/categoria")
-async def actualizar_categoria_transaccion(transaccion_id: int, nueva_categoria: dict):
+async def actualizar_categoria_transaccion(transaccion_id: int, categoria_update: CategoriaUpdate):
     """
     Actualiza la categoría de una transacción específica.
-    
-    Body JSON: {"nueva_categoria": "Gasto - Alimentos"}
     """
     try:
         if not db_manager:
             raise HTTPException(status_code=503, detail="Base de datos no disponible")
         
-        # Validar que se proporcione la nueva categoría
-        if "nueva_categoria" not in nueva_categoria:
-            raise HTTPException(status_code=400, detail="Campo 'nueva_categoria' requerido")
-        
-        categoria = nueva_categoria["nueva_categoria"]
-        
-        # Actualizar la transacción
-        transaccion_actualizada = db_manager.actualizar_categoria_transaccion(
-            transaccion_id, categoria
+        # Actualizar la categoría en la base de datos
+        resultado = db_manager.actualizar_categoria_transaccion(
+            transaccion_id=transaccion_id,
+            nueva_categoria=categoria_update.nueva_categoria
         )
         
-        if not transaccion_actualizada:
+        if not resultado:
             raise HTTPException(status_code=404, detail="Transacción no encontrada")
+        
+        # Obtener la transacción actualizada
+        df = db_manager.obtener_transaccion_por_id(transaccion_id)
+        
+        if df.empty:
+            raise HTTPException(status_code=404, detail="Transacción no encontrada después de actualizar")
+        row = df.iloc[0]
+        transaccion_actualizada = {
+            'id': int(row['id']),
+            'fecha': row['fecha'].strftime('%Y-%m-%d') if pd.notna(row['fecha']) and hasattr(row['fecha'], 'strftime') else str(row['fecha']) if pd.notna(row['fecha']) else None,
+            'detalle': str(row['detalle']),
+            'monto': float(row['monto']),
+            'tipo': str(row['tipo']),
+            'categoria': str(row['categoria']),
+            'tipo_regla': str(row['tipo_regla']),
+            'fecha_modificacion': row['fecha_modificacion'].strftime('%Y-%m-%d %H:%M:%S') if 'fecha_modificacion' in row and pd.notna(row['fecha_modificacion']) and hasattr(row['fecha_modificacion'], 'strftime') else str(row['fecha_modificacion']) if 'fecha_modificacion' in row and pd.notna(row['fecha_modificacion']) else None
+        }
         
         return JSONResponse(content={
             "status": "success",
-            "message": "Categoría actualizada correctamente",
+            "message": "Categoría actualizada exitosamente",
             "transaccion": transaccion_actualizada
         })
         
@@ -568,84 +656,79 @@ async def actualizar_categoria_transaccion(transaccion_id: int, nueva_categoria:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al actualizar categoría: {str(e)}")
 
-@app.get("/reglas-categorizacion/")
+@app.get("/categorias/reglas/")
 async def obtener_reglas_categorizacion():
     """
-    Obtiene las reglas de categorización en formato amigable.
+    Obtiene las reglas de categorización actuales (diccionario de palabras clave).
     """
     try:
-        from utils.categorizar import obtener_reglas_categorizacion
+        from utils.categorizar import CATEGORIA_KEYWORDS
         
-        reglas = obtener_reglas_categorizacion()
+        # Convertir el diccionario a una estructura más amigable para el frontend
+        reglas = []
+        for categoria, palabras in CATEGORIA_KEYWORDS.items():
+            reglas.append({
+                'categoria': categoria,
+                'palabras_clave': palabras,
+                'total_palabras': len(palabras)
+            })
+        
+        # Ordenar por categoría
+        reglas.sort(key=lambda x: x['categoria'])
         
         return JSONResponse(content={
-            "status": "success",
             "reglas": reglas,
             "total_categorias": len(reglas)
         })
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener reglas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener reglas de categorización: {str(e)}")
 
-@app.get("/categorias/")
-async def obtener_categorias_disponibles():
+@app.get("/transacciones/sin-categorizar/")
+async def obtener_transacciones_sin_categorizar():
     """
-    Obtiene todas las categorías únicas disponibles en la base de datos
-    y las categorías del sistema como fallback.
+    Obtiene todas las transacciones sin categorizar con sugerencias.
     """
     try:
         if not db_manager:
             raise HTTPException(status_code=503, detail="Base de datos no disponible")
         
-        # Obtener categorías usadas en transacciones
-        categorias_usadas = db_manager.obtener_categorias_disponibles()
+        # Obtener transacciones sin categorizar
+        df = db_manager.obtener_todas_transacciones()
+        df_sin_cat = df[df['categoria'] == "Sin categorizar"]
         
-        # Si hay pocas categorías, agregar las predefinidas del sistema
-        if len(categorias_usadas) < 10:
-            from utils.categorizar import definir_categorias
-            categorias_sistema = list(definir_categorias().keys())
-            
-            # Combinar y eliminar duplicados
-            todas_categorias = list(set(categorias_usadas + categorias_sistema))
-            todas_categorias.sort()
-        else:
-            todas_categorias = categorias_usadas
+        if df_sin_cat.empty:
+            return JSONResponse(content={
+                "transacciones": [],
+                "total": 0,
+                "mensaje": "No hay transacciones sin categorizar"
+            })
+        
+        # Importar función de sugerencias
+        from utils.categorizar import sugerir_categoria
+        
+        transacciones = []
+        for _, row in df_sin_cat.iterrows():
+            # Generar sugerencia para cada transacción
+            sugerencia = sugerir_categoria(row['detalle'])
+            transacciones.append({
+                'id': int(row['id']) if 'id' in row and pd.notna(row['id']) else None,
+                'fecha': row['fecha'].strftime('%Y-%m-%d') if pd.notna(row['fecha']) and hasattr(row['fecha'], 'strftime') else str(row['fecha']) if pd.notna(row['fecha']) else None,
+                'detalle': str(row['detalle']) if pd.notna(row['detalle']) else '',
+                'monto': float(row['monto']) if pd.notna(row['monto']) else 0.0,
+                'tipo': str(row['tipo']) if pd.notna(row['tipo']) else '',
+                'categoria': str(row['categoria']) if pd.notna(row['categoria']) else 'Sin categorizar',
+                'sugerencia': sugerencia,
+                'tipo_regla': str(row['tipo_regla']) if 'tipo_regla' in row and pd.notna(row['tipo_regla']) else 'sin_coincidencias'
+            })
         
         return JSONResponse(content={
-            "status": "success",
-            "categorias": todas_categorias
+            "transacciones": transacciones,
+            "total": len(transacciones)
         })
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener categorías: {str(e)}")
-
-@app.post("/sugerir-categoria/")
-async def sugerir_categoria(detalle: dict):
-    """
-    Sugiere categorías para un detalle específico.
-    
-    Body JSON: {"detalle": "NETFLIX.COM MENSUAL"}
-    """
-    try:
-        from utils.categorizar import sugerir_categoria_para_detalle
-        
-        # Validar que se proporcione el detalle
-        if "detalle" not in detalle:
-            raise HTTPException(status_code=400, detail="Campo 'detalle' requerido")
-        
-        texto_detalle = detalle["detalle"]
-        sugerencias = sugerir_categoria_para_detalle(texto_detalle)
-        
-        return JSONResponse(content={
-            "status": "success",
-            "detalle": texto_detalle,
-            "sugerencias": sugerencias
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al sugerir categoría: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener transacciones sin categorizar: {str(e)}")
 
 # =================== ENDPOINTS PARA CATEGORÍAS PERSONALIZADAS ===================
 
@@ -848,6 +931,20 @@ async def recategorizar_transacciones():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al recategorizar transacciones: {str(e)}")
+
+# Modelos Pydantic para requests
+class CategoriaUpdate(BaseModel):
+    nueva_categoria: str
+
+class TransaccionResponse(BaseModel):
+    id: int
+    fecha: str
+    detalle: str
+    monto: float
+    tipo: str
+    categoria: str
+    tipo_regla: str
+    fecha_modificacion: str
 
 if __name__ == "__main__":
     import uvicorn

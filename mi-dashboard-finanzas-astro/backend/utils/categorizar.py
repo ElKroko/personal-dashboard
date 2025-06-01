@@ -289,3 +289,148 @@ def sugerir_categoria_para_detalle(detalle):
     # Ordenar por score descendente
     sugerencias.sort(key=lambda x: x['score'], reverse=True)
     return sugerencias[:3]  # Retornar top 3 sugerencias
+
+def sugerir_categoria(detalle):
+    """
+    Sugiere una categoría para una transacción sin categorizar.
+    
+    Args:
+        detalle: Texto del detalle de la transacción
+    
+    Returns:
+        dict con la mejor sugerencia o None si no hay sugerencias
+    """
+    sugerencias = sugerir_categoria_para_detalle(detalle)
+    
+    if not sugerencias:
+        return None
+    
+    # Retornar la mejor sugerencia
+    mejor_sugerencia = sugerencias[0]
+    return {
+        'categoria_sugerida': mejor_sugerencia['categoria'],
+        'confianza': mejor_sugerencia['confianza'],
+        'palabras_encontradas': mejor_sugerencia['palabras_encontradas'],
+        'score': mejor_sugerencia['score']
+    }
+
+def obtener_coincidencias_parciales(detalle, umbral_coincidencia=0.6):
+    """
+    Encuentra coincidencias parciales usando similitud de texto.
+    
+    Args:
+        detalle: Texto del detalle de la transacción
+        umbral_coincidencia: Umbral mínimo de similitud (0.0 a 1.0)
+    
+    Returns:
+        Lista de categorías con similitud parcial
+    """
+    import difflib
+    
+    if not detalle:
+        return []
+    
+    categorias = definir_categorias()
+    detalle_words = detalle.upper().split()
+    sugerencias_parciales = []
+    
+    for categoria, palabras_clave in categorias.items():
+        for palabra_clave in palabras_clave:
+            # Verificar similitud con cada palabra del detalle
+            for detalle_word in detalle_words:
+                similitud = difflib.SequenceMatcher(
+                    None, palabra_clave, detalle_word
+                ).ratio()
+                
+                if similitud >= umbral_coincidencia:
+                    sugerencias_parciales.append({
+                        'categoria': categoria,
+                        'palabra_clave': palabra_clave,
+                        'palabra_detalle': detalle_word,
+                        'similitud': similitud,
+                        'confianza': 'baja' if similitud < 0.8 else 'media'
+                    })
+    
+    # Eliminar duplicados y ordenar por similitud
+    sugerencias_unicas = {}
+    for sug in sugerencias_parciales:
+        key = sug['categoria']
+        if key not in sugerencias_unicas or sug['similitud'] > sugerencias_unicas[key]['similitud']:
+            sugerencias_unicas[key] = sug
+    
+    # Convertir a lista y ordenar
+    resultado = list(sugerencias_unicas.values())
+    resultado.sort(key=lambda x: x['similitud'], reverse=True)
+    
+    return resultado[:5]  # Top 5 sugerencias
+
+def analizar_transacciones_sin_categorizar(df):
+    """
+    Analiza todas las transacciones sin categorizar y genera sugerencias.
+    
+    Args:
+        df: DataFrame con transacciones
+    
+    Returns:
+        dict con análisis y sugerencias
+    """
+    if df.empty:
+        return {
+            'total_sin_categorizar': 0,
+            'monto_total': 0,
+            'con_sugerencias': 0,
+            'sin_sugerencias': 0,
+            'sugerencias_por_categoria': {}
+        }
+    
+    sin_categorizar = df[df['categoria'] == 'Sin categorizar']
+    
+    if sin_categorizar.empty:
+        return {
+            'total_sin_categorizar': 0,
+            'monto_total': 0,
+            'con_sugerencias': 0,
+            'sin_sugerencias': 0,
+            'sugerencias_por_categoria': {}
+        }
+    
+    con_sugerencias = 0
+    sin_sugerencias = 0
+    sugerencias_por_categoria = {}
+    
+    for _, row in sin_categorizar.iterrows():
+        sugerencia = sugerir_categoria(row['detalle'])
+        
+        if sugerencia:
+            con_sugerencias += 1
+            categoria_sug = sugerencia['categoria_sugerida']
+            
+            if categoria_sug not in sugerencias_por_categoria:
+                sugerencias_por_categoria[categoria_sug] = {
+                    'count': 0,
+                    'monto_total': 0,
+                    'ejemplos': []
+                }
+            
+            sugerencias_por_categoria[categoria_sug]['count'] += 1
+            sugerencias_por_categoria[categoria_sug]['monto_total'] += row['monto']
+            
+            if len(sugerencias_por_categoria[categoria_sug]['ejemplos']) < 3:
+                sugerencias_por_categoria[categoria_sug]['ejemplos'].append({
+                    'detalle': row['detalle'],
+                    'monto': row['monto'],
+                    'confianza': sugerencia['confianza']
+                })
+        else:
+            sin_sugerencias += 1
+    
+    return {
+        'total_sin_categorizar': len(sin_categorizar),
+        'monto_total': sin_categorizar['monto'].sum(),
+        'con_sugerencias': con_sugerencias,
+        'sin_sugerencias': sin_sugerencias,
+        'sugerencias_por_categoria': sugerencias_por_categoria
+    }
+
+# Hacer disponibles las funciones principales
+CATEGORIA_KEYWORDS = definir_categorias()

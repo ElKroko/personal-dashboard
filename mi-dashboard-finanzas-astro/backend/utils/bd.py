@@ -238,9 +238,37 @@ class DatabaseManager:
         Args:
             transaccion_id: ID de la transacción a actualizar
             nueva_categoria: Nueva categoría a asignar
+        """
+        try:
+            from datetime import datetime
+            
+            transaccion = self.session.query(Transaccion).filter(
+                Transaccion.id == transaccion_id
+            ).first()
+            
+            if not transaccion:
+                return False
+            
+            transaccion.categoria = nueva_categoria
+            transaccion.tipo_regla = "sobrescritura_manual"
+            transaccion.fecha_modificacion = datetime.now()
+            
+            self.session.commit()
+            return True
+            
+        except Exception as e:
+            self.session.rollback()
+            raise Exception(f"Error al actualizar categoría de transacción: {str(e)}")
+    
+    def obtener_transaccion_por_id(self, transaccion_id):
+        """
+        Obtiene una transacción específica por su ID.
         
+        Args:
+            transaccion_id: ID de la transacción
+            
         Returns:
-            Transacción actualizada o None si no se encuentra
+            DataFrame con la transacción o DataFrame vacío si no se encuentra
         """
         try:
             transaccion = self.session.query(Transaccion).filter(
@@ -248,72 +276,85 @@ class DatabaseManager:
             ).first()
             
             if not transaccion:
-                return None
+                return pd.DataFrame()
             
-            transaccion.categoria = nueva_categoria
-            transaccion.tipo_regla = "sobrescritura_manual"
-            transaccion.fecha_modificacion = datetime.now()
+            # Convertir a DataFrame
+            data = [transaccion.to_dict()]
+            df = pd.DataFrame(data)
             
-            self.session.commit()
-            return transaccion.to_dict()
+            # Convertir fecha a datetime
+            if not df.empty:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+            
+            return df
             
         except Exception as e:
-            self.session.rollback()
-            raise Exception(f"Error al actualizar categoría: {str(e)}")
+            raise Exception(f"Error al obtener transacción por ID: {str(e)}")
     
-    def obtener_transacciones_filtradas(self, fecha_desde=None, fecha_hasta=None, 
-                                      categoria=None, tipo_movimiento=None, 
-                                      texto_busqueda=None, limit=None, offset=0):
+    def obtener_transacciones_sin_categorizar(self):
         """
-        Obtiene transacciones con filtros específicos.
-        
-        Args:
-            fecha_desde: Fecha mínima (formato YYYY-MM-DD)
-            fecha_hasta: Fecha máxima (formato YYYY-MM-DD)
-            categoria: Categoría específica
-            tipo_movimiento: 'INGRESO' o 'GASTO'
-            texto_busqueda: Texto a buscar en el campo detalle
-            limit: Número máximo de resultados
-            offset: Número de registros a saltar (paginación)
+        Obtiene todas las transacciones que están sin categorizar.
         
         Returns:
-            Lista de transacciones filtradas
+            DataFrame con transacciones sin categorizar
+        """
+        try:
+            transacciones = self.session.query(Transaccion).filter(
+                Transaccion.categoria == "Sin categorizar"
+            ).all()
+            
+            if not transacciones:
+                return pd.DataFrame()
+            
+            # Convertir a DataFrame
+            data = [t.to_dict() for t in transacciones]
+            df = pd.DataFrame(data)
+            
+            # Convertir fecha a datetime
+            if not df.empty:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+            
+            return df
+            
+        except Exception as e:
+            raise Exception(f"Error al obtener transacciones sin categorizar: {str(e)}")
+    
+    def obtener_resumen_por_categoria(self, fecha_desde=None, fecha_hasta=None):
+        """
+        Obtiene un resumen de transacciones agrupadas por categoría.
+        
+        Args:
+            fecha_desde: Fecha de inicio (opcional)
+            fecha_hasta: Fecha de fin (opcional)
+            
+        Returns:
+            DataFrame con resumen por categoría
         """
         try:
             query = self.session.query(Transaccion)
             
-            # Filtro por fecha
             if fecha_desde:
                 query = query.filter(Transaccion.fecha >= fecha_desde)
+            
             if fecha_hasta:
                 query = query.filter(Transaccion.fecha <= fecha_hasta)
             
-            # Filtro por categoría
-            if categoria:
-                query = query.filter(Transaccion.categoria == categoria)
-            
-            # Filtro por tipo de movimiento
-            if tipo_movimiento:
-                query = query.filter(Transaccion.tipo == tipo_movimiento)
-            
-            # Filtro por texto en detalle
-            if texto_busqueda:
-                query = query.filter(Transaccion.detalle.contains(texto_busqueda))
-            
-            # Ordenar por fecha descendente
-            query = query.order_by(Transaccion.fecha.desc())
-            
-            # Paginación
-            if limit:
-                query = query.limit(limit)
-            if offset:
-                query = query.offset(offset)
-            
             transacciones = query.all()
-            return [t.to_dict() for t in transacciones]
+            
+            if not transacciones:
+                return pd.DataFrame()
+            
+            # Convertir a DataFrame y agrupar
+            data = [t.to_dict() for t in transacciones]
+            df = pd.DataFrame(data)
+            
+            # Agrupar por categoría y tipo
+            resumen = df.groupby(['categoria', 'tipo'])['monto'].sum().reset_index()
+            
+            return resumen
             
         except Exception as e:
-            raise Exception(f"Error al obtener transacciones filtradas: {str(e)}")
+            raise Exception(f"Error al obtener resumen por categoría: {str(e)}")
     
     def contar_transacciones_filtradas(self, fecha_desde=None, fecha_hasta=None, 
                                      categoria=None, tipo_movimiento=None, 
