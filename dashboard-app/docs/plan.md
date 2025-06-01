@@ -1,569 +1,340 @@
-Aquí tienes un plan detallado, paso a paso, para crear un dashboard que te permita:
-
-1. **Cargar** tus archivos de transacciones (Excel – .xlsx).
-2. **Categorizar** automáticamente cada movimiento en ingresos o gastos (y subcategorías si lo deseas).
-3. **Calcular** historiales mensuales promedio de ingresos y gastos, así como un “gasto diario” de referencia.
-4. **Mostrar** vistas interactivas por día, semana, mes y vista general.
-
-Este plan está pensado para que vayas pidiendo a GitHub Copilot fragmentos de código conforme avanzas, enfocándote en cada funcionalidad. Lo planteo dividido en fases:
+A continuación tienes el mismo plan paso a paso para reemplazar Streamlit por Astro, pero sin incluir fragmentos de código. Se conserva la estructura y la descripción de cada acción que debes realizar:
 
 ---
 
-## Fase 1: Definición de requisitos y elección de tecnologías
+## 1. Preparar el proyecto y la estructura de carpetas
 
-1. **Definir exactamente qué datos necesitas extraer de cada planilla**
+1. **Crear la carpeta raíz**
 
-   * Columnas imprescindibles: fecha, descripción, monto, tipo (depende de tu Excel — por ejemplo, “Débito” o “Crédito”).
-   * ¿Hay alguna otra columna que quieras conservar? (por ejemplo, “categoría manual” o “comentarios”).
+   * Dentro de esa carpeta, crea dos subcarpetas:
 
-2. **Elegir el stack tecnológico**
+     * `backend/` (donde irá toda la lógica en Python).
+     * `frontend/` (donde irá la interfaz con Astro y React).
 
-   * **Lenguaje principal**: Python.
-   * **Bibliotecas para manejar Excel**: `pandas` + `openpyxl` (o `xlrd`/`xlwt` si tu archivo es muy antiguo).
-   * **Dashboard / interfaz web**:
+2. **Estructura recomendada**
 
-     * Opción ligera y rápida: [Streamlit](https://streamlit.io/)
-     * Opción más personalizada (pero con curva de aprendizaje mayor): [Dash by Plotly](https://dash.plot.ly/) o un framework JS (React/Vue) con backend en Flask/FastAPI.
-   * **Base de datos (opcional)**:
-
-     * Si tus archivos son pocos y siempre vas a recalcular sobre la marcha, podrías prescindir de base de datos y usar DataFrames en memoria.
-     * Si quieres persistir datos históricos y facilitar búsquedas, puedes usar SQLite (muy sencillo de integrar) o PostgreSQL si ya tienes el entorno montado.
-
-3. **Estructura de carpetas del proyecto**
-
-   ```text
-   tu-dashboard-finanzas/
-   ├── src/
-   │   ├── app.py                # punto de entrada de la app Streamlit o Flask
+   ```
+   mi-dashboard-finanzas-astro/
+   ├── backend/
+   │   ├── app.py
+   │   ├── requirements.txt
    │   ├── utils/
-   │   │   ├── leer_excel.py     # funciones para leer y limpiar tus planillas
-   │   │   ├── categorizar.py    # lógica para asignar categorías a cada transacción
-   │   │   ├── agregaciones.py   # cálculos de totales mensuales, promedios, etc.
-   │   │   └── fechas.py         # utilitarios para manejar cálculos de día/semana/mes
-   │   └── data/                 # (opcional) carpeta para guardar datos procesados o SQLite
-   ├── requirements.txt          # pandas, openpyxl, streamlit (u otro framework), sqlalchemy (si BD)
-   └── README.md
+   │   │   ├── leer_excel.py
+   │   │   ├── categorizar.py
+   │   │   ├── fechas.py
+   │   │   ├── agregaciones.py
+   │   │   └── bd.py      (opcional, si decides persistir en SQLite)
+   │   └── data/         (opcional, para base de datos o archivos temporales)
+   └── frontend/
+       ├── astro.config.mjs
+       ├── package.json
+       ├── public/       (archivos estáticos: CSS, imágenes, etc.)
+       └── src/
+           ├── components/
+           ├── layouts/
+           └── pages/
    ```
 
-   * Pídele a Copilot que te sugiera un `requirements.txt` después de definir qué librerías vas a usar.
+3. **Inicializar repositorios**
+
+   * Dentro de `backend/`, crea un entorno virtual de Python.
+   * Dentro de `frontend/`, inicializa un proyecto Astro con soporte para React (u otro framework de tu elección).
 
 ---
 
-## Fase 2: Configuración del entorno y dependencias
+## 2. Configurar el backend en Python con FastAPI
 
-1. **Crear un entorno virtual**
+### 2.1. Crear el entorno y dependencias
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate      # Linux/Mac
-   .venv\Scripts\activate.bat     # Windows
-   ```
+1. Entra en `backend/`, crea y activa un entorno virtual.
+2. Crea un `requirements.txt` que incluya al menos:
 
-2. **Crear `requirements.txt` y agregar dependencias principales**
-   Por ejemplo:
+   * `fastapi`
+   * `uvicorn` (para ejecutar el servidor)
+   * `pandas` (para manejar datos)
+   * `openpyxl` (para leer archivos .xlsx)
+   * `python-multipart` (para recibir archivos desde el frontend)
+   * `sqlalchemy` (opcional, solo si usarás SQLite o similar)
+3. Instala esas dependencias con `pip install -r requirements.txt`.
 
-   ```
-   pandas
-   openpyxl
-   streamlit
-   sqlalchemy    # solo si vas a usar una base de datos SQLite o similar
-   ```
+### 2.2. Implementar utilitarios de procesamiento
 
-   – Pídele a Copilot que te sugiera un `requirements.txt` más completo si añades otras librerías (p. ej. Plotly, scikit-learn si quieres un clustering de categorías, etc.).
+En `backend/utils/` crea varios archivos, cada uno con funciones clave:
 
-3. **Instalar dependencias**
+1. **`leer_excel.py`**
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+   * Función para recibir la ruta (o buffer) de un archivo .xlsx, leerlo con pandas y devolver un DataFrame.
+   * Función para renombrar columnas (por ejemplo, convertir “Fecha Mov.” a “fecha”, “Descripción” a “detalle”, etc.), convertir la columna de fecha a tipo datetime, convertir montos a numérico y mapear el tipo de movimiento (por ejemplo “C” o “CRÉDITO” a “Ingreso”, “D” o “DÉBITO” a “Gasto”).
+   * El resultado final es un DataFrame sin filas nulas en fecha, monto o tipo.
 
-4. **Inicializar repositorio Git (opcional, pero recomendado)**
+2. **`categorizar.py`**
 
-   ```bash
-   git init
-   git add .
-   git commit -m "Inicio: estructura base del dashboard de finanzas"
-   ```
+   * Define un diccionario de palabras clave que permitan mapear el contenido del campo “detalle” a una categoría (por ejemplo, si “detalle” contiene “SUPERMERCADO” → categoría “Gasto – Alimentos”; si contiene “SUELDO” → “Ingreso – Sueldos”, etc.).
+   * Función que recorra cada fila y, a partir del texto del detalle, asigne la categoría correspondiente.
+   * Deja como “Sin categorizar” aquellos movimientos que no coincidan con ninguna palabra clave predefinida.
 
----
+3. **`fechas.py`**
 
-## Fase 3: Lectura y limpieza de los archivos Excel
+   * Función que tome el DataFrame ya limpio y cree columnas adicionales:
 
-1. **Analizar ejemplo de planilla**
+     * `año` (año de la fecha),
+     * `mes` (número de mes),
+     * `dia` (día del mes),
+     * `semana` (semana ISO),
+       para facilitar luego los agrupamientos.
 
-   * Abre una de tus planillas con pandas para inspeccionar las columnas y formatos.
-   * Pídele a Copilot un fragmento que cargue un archivo .xlsx y muestre las primeras filas:
+4. **`agregaciones.py`**
 
-     ```python
-     import pandas as pd
+   * Funciones para calcular:
 
-     def cargar_transacciones(ruta_archivo: str) -> pd.DataFrame:
-         df = pd.read_excel(ruta_archivo)
-         print(df.head())
-         return df
-     ```
-   * Asegúrate de que pandas detecte bien las fechas (si no, usa `parse_dates=[“NombreColumnaFecha”]`).
+     * **Resumen mensual**: agrupar por `año` y `mes`, sumar montos de ingresos por un lado y gastos por otro, y calcular el neto (ingresos menos gastos).
+     * **Promedio mensual**: a partir del resumen mensual, obtener el ingreso promedio y el gasto promedio.
+     * **Gasto diario de referencia**: dividir el gasto promedio mensual entre 30 para obtener un “gasto diario promedio”.
+     * **Resumen semanal**: agrupar por `año` y `semana`, calculando ingresos, gastos y neto.
+     * **Estado semanal**: comparar el gasto acumulado en la semana actual con el valor de “gasto diario de referencia × 7” y devolver si el usuario “supera” o está “dentro” del presupuesto semanal.
 
-2. **Estandarizar nombres de columnas y convertir tipos**
+5. **`bd.py`** (opcional)
 
-   * Es posible que tus planillas tengan columnas como “Fecha Mov.”, “Descripción”, “Monto” o “Tipo Movimiento”.
-   * Crea una función `limpiar_dataframe(df)` en `utils/leer_excel.py` que:
+   * Si decides usar SQLite para persistir todas las transacciones en una base de datos, define aquí:
 
-     1. Renombre columnas a: `fecha`, `detalle`, `monto`, `tipo`.
-     2. Asegure que `df[“fecha”] = pd.to_datetime(df[“fecha”])`.
-     3. Convierta `monto` a `float` (e.g. `df[“monto”] = df[“monto”].astype(float)`).
-     4. Establezca `tipo` como “Ingreso” o “Gasto” (o el que corresponda), quizás con mapeo si tu banco lo exporta como “C”/“D” o “CR”/“DB”.
+     * El modelo con SQLAlchemy (tabla `transacciones` con campos `fecha`, `detalle`, `monto`, `tipo`, `categoria`, `año`, `mes`, `semana`).
+     * Función que reciba el DataFrame procesado y guarde cada fila en la BD, controlando posibles duplicados.
 
-   ‣ **Ejemplo sugerido por Copilot**:
+### 2.3. Crear el servidor FastAPI (`app.py`)
 
-   ```python
-   def limpiar_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-       # Renombrar columnas
-       df = df.rename(columns={
-           "Fecha Mov.": "fecha",
-           "Descripción": "detalle",
-           "Monto": "monto",
-           "Tipo Movimiento": "tipo"
-       })
-       # Convertir tipos
-       df["fecha"] = pd.to_datetime(df["fecha"], dayfirst=True, errors="coerce")
-       df["monto"] = pd.to_numeric(df["monto"], errors="coerce").fillna(0.0)
-       # Normalizar tipo (depende de cómo venga tu Excel)
-       mapeo_tipo = {
-           "C": "Ingreso",
-           "D": "Gasto",
-           "CRÉDITO": "Ingreso",
-           "DÉBITO": "Gasto",
-           # añade los que necesites
-       }
-       df["tipo"] = df["tipo"].str.strip().map(mapeo_tipo).fillna(df["tipo"])
-       return df.dropna(subset=["fecha", "monto", "tipo"])
-   ```
+1. **Configura CORS** para permitir que el frontend (por ejemplo, `localhost:3000`) haga llamadas al backend.
 
-3. **Probar lectura y limpieza**
+2. **Endpoint principal**: `/procesar/`
 
-   * En un script de prueba, carga varias planillas (por ejemplo, de “enviadas” y “recibidas”) y concaténalas:
+   * Acepta un archivo `.xlsx` en form-data.
+   * Permite validar extensión, guardar temporalmente el archivo, invocar las funciones de lectura, limpieza, categorización y agregación.
+   * Genera un objeto JSON con:
 
-     ```python
-     df1 = cargar_transacciones("enviadas.xlsx")
-     df1 = limpiar_dataframe(df1)
-     df2 = cargar_transacciones("recibidas.xlsx")
-     df2 = limpiar_dataframe(df2)
+     * Lista de transacciones (cada una con sus campos procesados).
+     * Lista del resumen mensual.
+     * Lista del resumen semanal.
+     * Un objeto con los promedios (`ingreso_promedio`, `gasto_promedio`).
+     * Un valor de “gasto diario de referencia”.
+     * El estado semanal (“supera” o “dentro”).
+   * Elimina el archivo temporal y devuelve la respuesta JSON.
 
-     df_todas = pd.concat([df1, df2], ignore_index=True)
-     print(df_todas.info())
-     ```
-   * Verifica que no haya valores nulos en columnas clave.
+3. **Ejecuta el servidor** con Uvicorn (por ejemplo, en `localhost:8000`).
 
 ---
 
-## Fase 4: Implementar lógica de categorización de ingresos y gastos
+## 3. Configurar el frontend con Astro
 
-1. **Decidir la estrategia de categorización**
+### 3.1. Inicializar un proyecto Astro
 
-   * ¿Quedará todo en “Ingreso” vs “Gasto”?
-   * ¿Quieres subcategorías (por ejemplo, “Alimentos”, “Transporte”, “Entretenimiento”, “Salud”)?
-   * En un comienzo, puedes hacer un **mapeo basado en palabras clave**:
-     • Si “detalle” contiene “SUPERMERCADO”, asigna “Gastos – Alimentos”.
-     • Si “detalle” contiene “SUELDO” o “NÓMINA”, asigna “Ingreso – Sueldos”.
-   * Más adelante podrías entrenar un modelo de clasificación (opcional), pero para arrancar un mapeo manual es suficiente.
+1. Dentro de `frontend/`, ejecuta `npm init astro@latest` y elige un template vacío o el que prefieras.
+2. Durante la instalación, selecciona React (o Vue/Svelte) como framework de integración, para poder crear componentes dinámicos.
+3. Instala dependencias adicionales, como `react`, `react-dom` y una librería de gráficos (por ejemplo, `chart.js` y su wrapper para React).
+4. Asegúrate de que `astro.config.mjs` incluya la integración con React.
 
-2. **Crear un archivo `utils/categorizar.py`** con algo como:
+### 3.2. Estructura de carpetas en el frontend
 
-   ```python
-   import pandas as pd
+Dentro de `frontend/src/` organiza así:
 
-   # Define tu diccionario de palabras clave a categorías
-   CATEGORIAS = {
-       "SUPERMERCADO": "Gasto – Alimentos",
-       "OTO FACTURA": "Gasto – Servicios",
-       "SUELDO": "Ingreso – Sueldos",
-       "NÓMINA": "Ingreso – Sueldos",
-       "RECAUDACIÓN": "Ingreso – Varios",
-       # etc.
-   }
+* **`components/`**
 
-   def asignar_categoria(detalle: str) -> str:
-       detalle_upper = detalle.upper()
-       for clave, categoria in CATEGORIAS.items():
-           if clave in detalle_upper:
-               return categoria
-       # Si no coincide con nada, marcar como “Sin categorizar”
-       return "Sin categorizar"
+  * `UploadForm.jsx`: componente React para subir el archivo a `/procesar/`.
+  * `Indicadores.jsx`: componente para mostrar los indicadores generales (ingreso promedio mensual, gasto promedio mensual, gasto diario de referencia y estado semanal).
+  * `Mensual.jsx`: componente para la vista mensual (select de año y mes; gráfica de barras por categorías; línea de saldo diario; tabla de transacciones del mes).
+  * `Semanal.jsx`: componente para la vista semanal (calcular etiquetas “Año–Semana” y graficar ingresos, gastos, neto).
+  * `Diario.jsx`: componente para la vista diaria (calcular saldo acumulado por fecha y graficar la evolución).
 
-   def categorizar_transacciones(df: pd.DataFrame) -> pd.DataFrame:
-       df["categoria"] = df["detalle"].apply(asignar_categoria)
-       return df
-   ```
+* **`layouts/`**
 
-   * **Prueba** con un pequeño `DataFrame` de ejemplo para asegurarte de que los mapeos funcionan.
+  * `MainLayout.astro`: layout principal con un navbar que tenga enlaces a “General”, “Mensual”, “Semanal” y “Diario”.
 
-3. **Permitir ajustes manuales** (opcional al principio)
+* **`pages/`**
 
-   * Podrías añadir en el futuro una vista donde el usuario vea las transacciones “Sin categorizar” y en un dropdown seleccione la categoría correcta.
-   * De momento, céntrate en la categorización automática.
+  * `index.astro`: página que use `UploadForm` e incluya el componente `DashboardGeneral` (que a su vez contiene `Indicadores` y la gráfica de líneas mensual).
+  * `mensual.astro`: página que muestre `UploadForm` y, tras cargar datos, muestre el componente `Mensual`.
+  * `semanal.astro`: página con `UploadForm` y, tras cargar datos, muestre `Semanal`.
+  * `diario.astro`: página con `UploadForm` y, tras cargar datos, muestre `Diario`.
 
----
+### 3.3. Flujo de la interfaz
 
-## Fase 5: Cálculos de historiales y métricas clave
+1. En cada página (`index.astro`, `mensual.astro`, etc.), coloca el layout principal con el navbar.
 
-1. **Crear utilitarios de fechas en `utils/fechas.py`**
+2. Dentro del layout, inserta un `UploadForm` que reciba un prop `onDataLoaded`.
 
-   ```python
-   import pandas as pd
+3. Cuando el usuario sube un archivo, `UploadForm` hace `fetch` a `http://localhost:8000/procesar/` y obtiene el JSON procesado.
 
-   def agregar_columnas_tiempo(df: pd.DataFrame) -> pd.DataFrame:
-       df["año"] = df["fecha"].dt.year
-       df["mes"] = df["fecha"].dt.month
-       df["dia"] = df["fecha"].dt.day
-       df["semana"] = df["fecha"].dt.isocalendar().week
-       return df
-   ```
+4. Ese JSON se guarda en el estado de React (por ejemplo, usando `useState` en un componente envolvente).
 
-2. **Crear funciones de agregación mensual en `utils/agregaciones.py`**
+5. Una vez que `data` está disponible en el estado, se renderiza:
 
-   ```python
-   import pandas as pd
+   * En “General” (página principal):
 
-   def resumen_mensual(df: pd.DataFrame) -> pd.DataFrame:
-       """
-       Devuelve un DataFrame con columnas:
-       año, mes, total_ingresos, total_gastos, neto
-       """
-       # Filtrar ingresos y gastos por separado
-       ingresos = df[df["tipo"] == "Ingreso"].groupby(["año", "mes"])["monto"].sum().rename("total_ingresos")
-       gastos   = df[df["tipo"] == "Gasto"].groupby(["año", "mes"])["monto"].sum().rename("total_gastos")
+     * `Indicadores` (pasa `data.promedios`, `data.gasto_diario_referencia`, `data.estado_semanal`).
+     * Gráfica de líneas mensual (usa `data.resumen_mensual` para las etiquetas “Año–Mes” y para los valores de `total_ingresos`, `total_gastos`, `neto`).
+   * En “Mensual”:
 
-       resumen = pd.concat([ingresos, gastos], axis=1).fillna(0)
-       resumen["neto"] = resumen["total_ingresos"] + resumen["total_gastos"]  # gastos son negativos o positivos?
-       # Si en tu DataFrame los gastos están con signo negativo, ajusta la lógica.
-       return resumen.reset_index()
+     * Extrae la lista de años de `data.resumen_mensual`.
+     * Cuando el usuario elige un año, extrae la lista de meses disponibles de `data.transacciones`.
+     * Al elegir año y mes, filtra `data.transacciones` para ese período, agrupa por categoría (para la gráfica de barras) y agrupa por fecha (para la gráfica de línea del saldo diario). También muestra una tabla con todas las transacciones filtradas.
+   * En “Semanal”:
 
-   def ingreso_gasto_promedio_mensual(resumen_df: pd.DataFrame) -> dict:
-       """
-       Recibe el DataFrame de resumen_mensual y devuelve:
-       {"ingreso_promedio": ..., "gasto_promedio": ...}
-       """
-       ingreso_promedio = resumen_df["total_ingresos"].mean()
-       gasto_promedio   = resumen_df["total_gastos"].mean()
-       return {
-           "ingreso_promedio": ingreso_promedio,
-           "gasto_promedio": gasto_promedio
-       }
+     * Con `data.resumen_semanal`, construye etiquetas “Año–Semana” y grafica ingresos, gastos y neto para cada semana.
+   * En “Diario”:
 
-   def gasto_diario_referencia(resumen_df: pd.DataFrame) -> float:
-       """
-       Calcula un promedio diario de gasto en base a promedios mensuales:
-       (gasto_promedio_mensual / 30) o podrías usar 365/12 ≈ 30.4167
-       """
-       gastos_promedio = resumen_df["total_gastos"].mean()
-       return gastos_promedio / 30.0
-   ```
+     * A partir de `data.transacciones`, agrupa por día y calcula el saldo acumulado hasta cada fecha; luego grafica esa evolución en una línea.
 
-3. **Prueba localmente**
-
-   * Crea un pequeño DataFrame simulado para ver que `resumen_mensual` te devuelve lo que esperas.
-   * Pídele a Copilot que genere un ejemplo de DataFrame con datos de dos meses y valida la función.
-
-4. **Agregar cálculo semanal (opcional)**
-
-   * Si quieres mostrar un “tracking” semanal, agrupa por `año` y `semana` de forma similar a mensual:
-
-     ```python
-     def resumen_semanal(df: pd.DataFrame) -> pd.DataFrame:
-         ingresos = df[df["tipo"] == "Ingreso"].groupby(["año", "semana"])["monto"].sum().rename("ingresos")
-         gastos   = df[df["tipo"] == "Gasto"].groupby(["año", "semana"])["monto"].sum().rename("gastos")
-         resumen  = pd.concat([ingresos, gastos], axis=1).fillna(0)
-         resumen["neto"] = resumen["ingresos"] + resumen["gastos"]
-         return resumen.reset_index()
-     ```
-   * Esto te permitirá luego graficar un “avance” semanal.
+6. Cada componente (Mensual, Semanal, Diario) se monta con la directiva `client:load` para que React se ejecute en el cliente.
 
 ---
 
-## Fase 6: Estructura básica del dashboard
+## 4. Ajustes de estilo y navegabilidad
 
-1. **Decidir la herramienta de visualización**
+1. **Navbar general**
 
-   * Para un MVP rápido, recomiendo **Streamlit** porque:
+   * En `MainLayout.astro`, crea un `<nav>` con enlaces a las rutas `/`, `/mensual`, `/semanal`, `/diario`.
+   * Aplica estilos básicos (por ejemplo, fondo oscuro, texto claro, padding).
 
-     * Permite subir archivos (`st.file_uploader`) de forma muy sencilla.
-     * Tiene gráficos integrados con pandas/Plotly.
-     * Es muy rápido de iterar y ver resultados.
+2. **CSS global**
 
-2. **Crear `src/app.py` con la lógica principal**
+   * Crea un archivo `public/styles.css` donde definas estilos básicos:
 
-   ```python
-   import streamlit as st
-   import pandas as pd
+     * Tipografías, tamaños de fuente, márgenes globales, colores, etc.
+     * Estilos para tablas (bordes, espaciado) y contenedores de gráfico (ancho máximo, centrado).
 
-   from utils.leer_excel import cargar_transacciones, limpiar_dataframe
-   from utils.categorizar import categorizar_transacciones
-   from utils.fechas import agregar_columnas_tiempo
-   from utils.agregaciones import resumen_mensual, ingreso_gasto_promedio_mensual, gasto_diario_referencia, resumen_semanal
+3. **Componentes responsivos**
 
-   def main():
-       st.title("Dashboard de Finanzas Personales")
-
-       # 1. Subida de archivos
-       st.header("1. Carga tus planillas (.xlsx)")
-       archivo = st.file_uploader("Selecciona tu archivo de transacciones", type=["xlsx"])
-       if archivo is not None:
-           # Leer y limpiar
-           df = pd.read_excel(archivo)
-           df = limpiar_dataframe(df)
-           df = categorizar_transacciones(df)
-           df = agregar_columnas_tiempo(df)
-
-           st.success("Archivo cargado y procesado correctamente.")
-           st.dataframe(df.head())  # mostrar muestra de datos
-
-           # 2. Mostrar métricas generales
-           st.header("2. Métricas Generales")
-           resumen_m = resumen_mensual(df)
-           promedios = ingreso_gasto_promedio_mensual(resumen_m)
-           gasto_diario = gasto_diario_referencia(resumen_m)
-
-           st.metric("Ingreso promedio mensual", f"${promedios['ingreso_promedio']:.2f}")
-           st.metric("Gasto promedio mensual", f"${promedios['gasto_promedio']:.2f}")
-           st.metric("Gasto diario de referencia", f"${gasto_diario:.2f}")
-
-           # 3. Vistas por periodo
-           st.header("3. Vistas por periodo")
-           vista = st.selectbox("Selecciona vista", ["General", "Mensual", "Semanal", "Diaria"])
-           if vista == "General":
-               st.subheader("Historial mensual completo")
-               st.line_chart(resumen_m.set_index(["año", "mes"])[["total_ingresos", "total_gastos", "neto"]])
-           elif vista == "Mensual":
-               mes_sel = st.slider("Selecciona mes/año", min_value=int(df["año"].min()), max_value=int(df["año"].max()), step=1, format="%d")
-               # Aquí podrías permitir elegir también el mes con otro slider o selectbox
-               st.write("Pendiente: filtrar por mes específico y mostrar desglose por días")
-           elif vista == "Semanal":
-               resumen_s = resumen_semanal(df)
-               st.line_chart(resumen_s.set_index(["año", "semana"])[["ingresos", "gastos", "neto"]])
-           elif vista == "Diaria":
-               df_dia = df.groupby("fecha")["monto"].sum().rename("saldo_diario").reset_index()
-               st.line_chart(df_dia.set_index("fecha"))
-
-   if __name__ == "__main__":
-       main()
-   ```
-
-   * **Nota**: Este código es un esqueleto. Pídele a Copilot que complete los detalles, como filtrar por mes dentro de la vista “Mensual” o dividir por categorías.
-
-3. **Pedir a Copilot que te ayude a refinar la parte de selección de mes**
-
-   * Por ejemplo:
-
-     ```python
-     # En la sección Mensual:
-     años_disponibles = df["año"].unique().tolist()
-     año_sel = st.selectbox("Año", sorted(años_disponibles))
-     meses_disponibles = df[df["año"] == año_sel]["mes"].unique().tolist()
-     mes_sel = st.selectbox("Mes", sorted(meses_disponibles))
-     df_mes = df[(df["año"] == año_sel) & (df["mes"] == mes_sel)]
-     # Mostrar gráfico de ingresos/gastos/días en ese mes
-     ```
-   * Con esto, el usuario podrá ver cada mes por separado.
+   * Asegúrate de que los contenedores de gráficos tengan un ancho máximo razonable (ej. 800 px) y que se ajusten en pantallas pequeñas.
+   * Si lo deseas, puedes integrar Tailwind CSS en lugar de escribir un CSS tradicional, pero no es obligatorio.
 
 ---
 
-## Fase 7: Refinamiento de la interfaz y vistas detalladas
+## 5. Persistencia de datos (opcional)
 
-1. **Vista General**
+1. **Decidir si usar base de datos**
 
-   * Gráfico de líneas con `total_ingresos`, `total_gastos` y `neto` mes a mes.
-   * Tabla resumen con un DataFrame que contenga columnas: `Año`, `Mes`, `Ingreso`, `Gasto`, `Neto`, `% gastos/ingresos` (opcional).
+   * Para un MVP, no es estrictamente necesario: cada vez que el usuario sube un archivo, se procesa todo en memoria y se devuelve JSON.
+   * Si deseas que el usuario mantenga un historial creciente de transacciones sin volver a subir planillas antiguas, implementa SQLite en `backend/utils/bd.py`:
 
-2. **Vista Mensual Detallada**
+     * Define el modelo “Transaccion” con campos: `fecha`, `detalle`, `monto`, `tipo`, `categoria`, `año`, `mes`, `semana`.
+     * Crea una función para guardar todas las filas del DataFrame en la tabla, omitiendo duplicados.
+     * Ajusta el endpoint `/procesar/` para que, después de procesar el DataFrame, lo guarde en la base. Y crea endpoints adicionales (por ejemplo, `GET /historial/`) que permitan consultar datos históricos sin necesidad de subir nuevamente un archivo.
 
-   * Una vez seleccionado año y mes, mostrar:
+2. **Modificar el endpoint de carga**
 
-     * **Gráfico de barras** con los gastos por categoría.
-     * **Gráfico de líneas** con la evolución día a día del mes (saldo diario).
-     * **Tabla** con todas las transacciones del mes (con opción de búsqueda/filtrado).
-
-3. **Vista Semanal**
-
-   * Como ya tienes `resumen_semanal`, muestra:
-
-     * **Gráfico de barras** o líneas con ingresos vs gastos por semana en todo el rango de datos.
-     * Si lo deseas, un filtro para elegir un rango de semanas específicas.
-
-4. **Vista Diaria**
-
-   * Mapa de calor (“heatmap”) opcional:
-
-     * Eje X = días (1–31), Eje Y = meses (1–12), color = monto total gastado ese día.
-     * Para esto podrías usar `plotly.express.imshow` o `matplotlib` con un DataFrame 12×31.
-   * Gráfico de línea del balance diario en todo el período.
-
-5. **Indicadores “Voy bien / Voy mal”**
-
-   * Definir umbrales:
-
-     * Si tu gasto diario acumulado en la semana supera `(gasto_promedio_mensual / 30) * 7`, mostrar alerta “Vas por encima del presupuesto”.
-     * Si está por debajo, “Vas bien”.
-   * Implementar lógica:
-
-     ```python
-     def estado_semanal(df: pd.DataFrame) -> str:
-         hoy = pd.to_datetime("today").normalize()
-         inicio_semana = hoy - pd.Timedelta(days=hoy.weekday())  # Lunes de la semana actual
-         df_sem = df[(df["fecha"] >= inicio_semana) & (df["fecha"] <= hoy)]
-         gasto_sem = df_sem[df_sem["tipo"] == "Gasto"]["monto"].sum()
-         gasto_diario_ref = gasto_diario_referencia(resumen_m)
-         gasto_semanal_ref = gasto_diario_ref * 7
-         if gasto_sem > gasto_semanal_ref:
-             return "Estás gastando más de lo esperado esta semana."
-         else:
-             return "Tu gasto esta semana está dentro del presupuesto."
-     ```
-   * Muestra esa cadena como `st.warning(...)` o `st.success(...)` según corresponda.
+   * Si implementas la base de datos, pregunta al usuario si quiere “guardar” o “reemplazar” los datos.
+   * Si elige guardar, ejecuta la función que persiste; si elige reemplazar, borra la tabla y reimporta.
 
 ---
 
-## Fase 8: Persistencia de datos (opcional)
+## 6. Pruebas y ejecución local
 
-1. **Decidir si guardar datos en una base de datos**
+1. **Levantar backend**:
 
-   * Si planeas mantener un histórico que puedas ir “acumulando”, en lugar de cargar siempre planillas antiguas, conviene usar SQLite.
-   * Crea una tabla `transacciones` con columnas: `id` (autoincremental), `fecha`, `detalle`, `monto`, `tipo`, `categoria`, `año`, `mes`, `semana`.
+   * En `backend/`, activa el entorno virtual y ejecuta `uvicorn app:app --reload --port 8000`.
 
-2. **Configurar SQLAlchemy (o sqlite3 “mínimo”)**
+2. **Levantar frontend**:
 
-   * Con SQLAlchemy, define un modelo:
+   * En `frontend/`, instala dependencias con `npm install`.
+   * Ejecuta `npm run dev` para levantar Astro en `http://localhost:3000`.
 
-     ```python
-     from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
-     from sqlalchemy.ext.declarative import declarative_base
-     from sqlalchemy.orm import sessionmaker
+3. **Prueba de flujo completo**:
 
-     Base = declarative_base()
+   * Abre el navegador en `http://localhost:3000`.
+   * Sube un archivo `.xlsx` de ejemplo en la página “General”.
+   * Verifica que aparezcan los indicadores, la gráfica mensual, etc.
+   * Navega a “Mensual” y comprueba que puedas seleccionar año/mes y ver la gráfica de barras, línea y tabla.
+   * Repite en “Semanal” y “Diario” para confirmar que todos los datos se representan correctamente.
 
-     class Transaccion(Base):
-         __tablename__ = "transacciones"
-         id = Column(Integer, primary_key=True)
-         fecha = Column(DateTime)
-         detalle = Column(String)
-         monto = Column(Float)
-         tipo = Column(String)
-         categoria = Column(String)
-         año = Column(Integer)
-         mes = Column(Integer)
-         semana = Column(Integer)
+4. **Ajustar CORS**:
 
-     engine = create_engine("sqlite:///data/finanzas.db")
-     Session = sessionmaker(bind=engine)
-     Base.metadata.create_all(engine)
-     ```
-   * Pídele a Copilot que te ayude a escribir la clase y la configuración de la base de datos.
-
-3. **Función para guardar transacciones en la BD**
-
-   * En `utils/bd.py`:
-
-     ```python
-     from sqlalchemy.orm import Session
-     from .models import Transaccion, Session as DBSession
-
-     def guardar_en_bd(df: pd.DataFrame):
-         session = DBSession()
-         for _, row in df.iterrows():
-             trans = Transaccion(
-                 fecha=row["fecha"],
-                 detalle=row["detalle"],
-                 monto=row["monto"],
-                 tipo=row["tipo"],
-                 categoria=row["categoria"],
-                 año=row["año"],
-                 mes=row["mes"],
-                 semana=row["semana"]
-             )
-             session.add(trans)
-         session.commit()
-         session.close()
-     ```
-   * De esta forma, si tu dashboard arranca, puede consultar todos los datos previamente guardados y sumar nuevos registros sin duplicar (luego necesitarás lógica para evitar duplicados).
-
-4. **Integrar carga/actualización en la interfaz**
-
-   * En `app.py`, tras procesar el `DataFrame`, pregunta si el usuario quiere “Guardar estos datos en la base” o “Reemplazar historial”.
-
-     ```python
-     if st.button("Guardar en BD"):
-         guardar_en_bd(df)
-         st.success("Transacciones guardadas en la base de datos.")
-     ```
-   * Luego, al iniciar la app, si encuentras datos en BD, cárgalos y combínalos con lo que cargue el usuario.
+   * Si al hacer fetch desde `localhost:3000` hacia `localhost:8000` recibes errores, revisa la configuración de CORS en FastAPI y asegúrate de permitir el origen del frontend.
 
 ---
 
-## Fase 9: Estilizar y ajustar detalles finales
+## 7. Despliegue en producción
 
-1. **Mejoras de interfaz**
+1. **Backend**:
 
-   * Añade un **sidebar** en Streamlit (`st.sidebar`) para seleccionar año, mes, rango de fechas, categorías a mostrar, etc.
-   * Usa `st.expander` para ocultar detalles por defecto y que la página no quede tan cargada.
+   * Empaqueta como un contenedor Docker o despliega en un servicio como Heroku, DigitalOcean, AWS, etc.
+   * Asegúrate de exponer el puerto 8000 y configurar correctamente variables de entorno (por ejemplo, ruta a la base de datos).
 
-2. **Documentar claramente cada sección**
+2. **Frontend (Astro)**:
 
-   * En el README, explica cómo instalar el proyecto, cómo ejecutar la app (`streamlit run src/app.py`) y cómo preparar las planillas para que sean compatibles.
-   * Incluye un **ejemplo de planilla** mínima en `docs/ejemplo.xlsx` con columnas de muestra, para que el usuario sepa el formato exacto.
+   * Ejecuta `npm run build` para generar la carpeta `dist/`.
+   * Puedes subir esa carpeta a servicios tradicionales de hosting estático (Netlify, Vercel, AWS S3 + CloudFront, etc.).
+   * Si prefieres servirlo junto al backend, configura un servidor web (nginx) que sirva los archivos estáticos de `dist/` y redirija las llamadas a `/procesar/` al backend.
 
-3. **Pruebas**
+3. **Configuración de dominios y SSL**:
 
-   * Crea un par de archivos de test con datos ficticios para comprobar que las métricas funcionan correctamente (por ejemplo, que el cálculo de promedio mensual no falle con meses sin datos).
-   * Pídele a Copilot que genere tests automatizados con `pytest` (por ejemplo, probando `resumen_mensual` con un DataFrame controlado).
-
-4. **Lanzamiento y despliegue**
-
-   * Si quieres que el dashboard esté disponible desde cualquier lugar, puedes desplegar en **Streamlit Cloud** (requiere conectar un repositorio Git).
-   * O alojarlo en un servidor propio usando `nginx` + `gunicorn` + `certbot` si deseas SSL.
+   * En producción, restringe CORS para aceptar únicamente tu dominio.
+   * Configura certificados SSL (Let’s Encrypt) para servir todo mediante HTTPS.
 
 ---
 
-## Fase 10: Posibles mejoras a futuro
+## 8. Cómo usar GitHub Copilot en este flujo
 
-1. **Autocategorización avanzada**
+* **En el backend**:
 
-   * Importar un pequeño modelo de clasificación (por ejemplo, un `RandomForest` o un clasificador basado en palabras) que mejore el mapeo de categorías.
-   * Entrena el modelo con transacciones ya categorizadas manualmente para aumentar su precisión.
+  * Al crear cada archivo en `utils/`, escribe comentarios que indiquen la funcionalidad deseada (por ejemplo:
+    “Función para leer .xlsx, renombrar columnas y convertir tipos”). Luego deja varias líneas en blanco para que Copilot proponga la implementación.
+  * Para el `app.py`, pon un encabezado de función con docstring (“Recibe archivo, lee, limpia, categoriza, agrega columnas de tiempo, calcula resúmenes y devuelve JSON”) para que Copilot genere el esqueleto del endpoint.
+  * Revisa cuidadosamente cada sugerencia para confirmar que los nombres de columnas, rutas y tipos coincidan con tus planillas reales.
 
-2. **Alertas y notificaciones**
+* **En el frontend**:
 
-   * Conectar un sistema de notificaciones (por email o Telegram) que, cuando tu gasto semanal/j mensual supere un umbral, te avise.
-   * En Python podrías usar `schedule` o `APScheduler` para ejecutar un script diario que compruebe tu statu y envíe un mail con `smtplib`.
+  * Al crear `UploadForm.jsx`, pon un comentario que describa que debe “recibir archivo .xlsx y enviarlo a `/procesar/`, luego llamar a una función callback con los datos JSON”.
+  * En `Indicadores.jsx`, escribe un comentario: “Mostrar ingreso promedio mensual, gasto promedio mensual, gasto diario de referencia y estado semanal, utilizando props”. Copilot generará el JSX con etiquetas y lógica básica.
+  * Para `Mensual.jsx`, añade un comentario que explique:
 
-3. **Integración con API bancaria** (si Banco de Chile ofrece algún endpoint de exportación automática)
+    1. “Recibir data JSON con resumen mensual y lista de transacciones”.
+    2. “Construir selects de año y mes, filtrar transacciones, agrupar por categoría y por día”.
+    3. “Generar gráficos de barras y de línea” y “mostrar tabla”.
+       Copilot completará las funciones de agrupamiento en JavaScript y el JSX para los charts.
+  * En cada página Astro (`index.astro`, `mensual.astro`, etc.), escribe un fragmento del layout (<Layout>…</Layout>) y deja espacio para que Copilot te sugiera los imports y la directiva `client:load`.
 
-   * Automáticamente descargar movimientos y actualizar tu BD sin subir archivos manualmente. (Requiere permisos de API y autenticación segura).
+* **Itera gradualmente**:
 
-4. **Dashboard multiusuario**
-
-   * Si quisieras ofrecer esta herramienta a terceros, añade autenticación (por ejemplo, con Firebase Auth o con OAuth2) y guarda datos por usuario.
-   * Cambia de SQLite a PostgreSQL para escalar.
-
----
-
-## Cómo usar GitHub Copilot durante todo el proceso
-
-* **Comentarios claros sobre lo que necesitas**: Cuando vayas a crear una función, escribe un docstring o comentario muy específico (por ejemplo, `# Función para calcular promedio mensual de gastos e ingresos`) y deja unas líneas para que Copilot genere el código.
-* **Itera en trozos pequeños**: No pidas de golpe “Crea todo el dashboard”. Ve por pasos: primero la función de lectura y limpieza, pruébala; luego la función de categorización, pruébala; luego el cálculo mensual; y así sucesivamente.
-* **Revisa siempre lo que genera**: Copilot es un asistente, pero debe revisarse línea por línea. Confirma que las conversiones de tipo son correctas y no hay errores de indentación o dependencias faltantes.
-* **Pide sugerencias**: Por ejemplo, “// Copilot, ¿me sugieres un mapeo de palabras clave para categorías?” o “// Copilot: dame un ejemplo de cómo filtrar un DataFrame por mes y año”.
+  * No pidas de golpe “Crea todo el backend”; ve archivo por archivo.
+  * Primero procesar DataFrame, luego cálculo de agregaciones, luego el endpoint, etc.
+  * En el frontend, primero el componente de subida, luego los indicadores, luego los gráficos de una sola vista, y así sucesivamente.
 
 ---
 
-### Resumen de pasos clave
+## 9. Resumen de pasos sin código
 
-1. **Estructura básica**: crea el proyecto, instala dependencias, prepara carpetas.
-2. **Lectura y limpieza**: usa pandas para abrir tu .xlsx, normaliza columnas, convierte tipos.
-3. **Categorización**: implementa un diccionario de palabras clave y aplica a cada transacción.
-4. **Agregaciones**: calcula totales mensuales, promedios y gasto diario de referencia.
-5. **Dashboard con Streamlit**: subida de archivos, mostrar DataFrame, gráficos por mes/semana/día y métricas.
-6. **Persistencia (opcional)**: guarda datos en SQLite para no tener que recargar planillas antiguas.
-7. **Pruebas y ajustes**: valida cada función con ejemplos controlados y añade tests.
-8. **Despliegue**: publica en Streamlit Cloud o tu propio servidor.
+1. **Preparar estructura** (dos carpetas: backend y frontend).
 
-Siguiendo este plan, podrás ir solicitando a Copilot código concreto en cada paso, validándolo a medida que avanzas y construyendo un dashboard funcional y escalable. ¡Éxito en tu proyecto!
+2. **Backend con FastAPI**:
+
+   * Leer y limpiar Excel (pandas).
+   * Categorizar transacciones.
+   * Agregar columnas de tiempo (año, mes, día, semana).
+   * Calcular resúmenes (mensual, semanal, promedios, gasto diario de referencia, estado semanal).
+   * Exponer un endpoint `/procesar/` que devuelva todo en JSON.
+   * (Opcional) Persistir en SQLite con SQLAlchemy.
+
+3. **Frontend con Astro + React**:
+
+   * Componente `UploadForm`: subir archivo y hacer POST a `/procesar/`.
+   * Componente `Indicadores`: mostrar métricas generales.
+   * Componente `Mensual`: seleccionar año/mes, gráfica de barras por categoría, línea de saldo diario, tabla de transacciones.
+   * Componente `Semanal`: gráfica de líneas de ingresos/gastos/neto por semana.
+   * Componente `Diario`: gráfica de línea de saldo acumulado diario.
+   * Layout principal con navbar que enlaza a páginas “General”, “Mensual”, “Semanal” y “Diario”.
+   * Cada página Astro monta su respectivo componente React con `client:load` para permitir la interacción en el cliente.
+
+4. **Estilos y navegación**:
+
+   * CSS global (puede ser un archivo estático o integración con Tailwind).
+   * Navbar con enlaces a las cuatro vistas.
+
+5. **Pruebas locales**:
+
+   * Levantar backend en puerto 8000.
+   * Levantar frontend en puerto 3000.
+   * Subir archivos de prueba y verificar que todo funcione.
+
+6. **Despliegue**:
+
+   * Backend como servicio (o contenedor).
+   * Frontend como sitio estático.
+   * Configurar CORS y SSL en producción.
